@@ -1,0 +1,8 @@
+dist-newstyle/
+.build/
+.cache/
+*.hi
+*.o
+
+# oj / local tooling
+.cookie.jar

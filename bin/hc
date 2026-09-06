@@ -1,0 +1,434 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+CONTESTS_DIR="$ROOT/contests"
+BUILD_SRC="$ROOT/.build/Main.hs"
+PREPARE_CONFIG="$ROOT/config/prepare.config.toml"
+TEMPLATE_SRC="$ROOT/templates/Main.hs"
+
+die() {
+  printf 'hc: %s\n' "$*" >&2
+  exit 2
+}
+
+note() {
+  printf '==> %s\n' "$*" >&2
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "'$1' is required but was not found in PATH"
+}
+
+template_config_dir() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s\n' "$HOME/Library/Application Support/online-judge-tools/template"
+      ;;
+    Linux)
+      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/online-judge-tools/template"
+      ;;
+    *)
+      # This matches the common appdirs layout on Unix-like systems.
+      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/online-judge-tools/template"
+      ;;
+  esac
+}
+
+install_template() {
+  local dir
+  dir="$(template_config_dir)"
+  mkdir -p "$dir"
+  cp "$TEMPLATE_SRC" "$dir/haskell-atcoder.hs"
+}
+
+# Bash 3.2 (the version shipped with macOS) lacks the ${var,,} expansion.
+to_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+normalize_task_id() {
+  local contest="$1"
+  local task="$2"
+
+  if [[ "$task" == *_* ]]; then
+    printf '%s\n' "$task"
+  else
+    printf '%s_%s\n' "$contest" "$(to_lower "$task")"
+  fi
+}
+
+is_problem_dir() {
+  [[ -f "$1/Main.hs" && -d "$1/test" ]]
+}
+
+has_samples() {
+  local dir="$1"
+  local f
+  [[ -d "$dir/test" ]] || return 1
+  for f in "$dir"/test/*.in; do
+    [[ -f "$f" ]] && return 0
+  done
+  return 1
+}
+
+contest_url() {
+  printf 'https://atcoder.jp/contests/%s\n' "$1"
+}
+
+problem_url() {
+  printf 'https://atcoder.jp/contests/%s/tasks/%s\n' "$1" "$2"
+}
+
+# https://atcoder.jp/contests/abc465            -> abc465
+# https://atcoder.jp/contests/abc465/tasks/...  -> abc465
+contest_id_from_url() {
+  local url="$1"
+  local rest
+  [[ "$url" == */contests/* ]] || return 1
+  rest="${url#*/contests/}"
+  printf '%s\n' "${rest%%/*}"
+}
+
+resolve_problem() {
+  local a="${1:-}"
+  local b="${2:-}"
+  local cwd
+  cwd="$(pwd -P)"
+
+  PROBLEM_DIR=""
+  CONTEST_ID=""
+  PROBLEM_ID=""
+
+  # hc test            (when cwd is contests/<contest>/<problem>)
+  if [[ -z "$a" ]]; then
+    if [[ "$cwd" == "$CONTESTS_DIR/"*/* ]] && is_problem_dir "$cwd"; then
+      PROBLEM_DIR="$cwd"
+      PROBLEM_ID="$(basename "$PROBLEM_DIR")"
+      CONTEST_ID="$(basename "$(dirname "$PROBLEM_DIR")")"
+    else
+      die "task is required (or run inside a problem directory)"
+    fi
+
+  # hc test abc473 a
+  elif [[ -n "$b" ]]; then
+    CONTEST_ID="$a"
+    PROBLEM_ID="$(normalize_task_id "$CONTEST_ID" "$b")"
+    PROBLEM_DIR="$CONTESTS_DIR/$CONTEST_ID/$PROBLEM_ID"
+
+  # hc test a          (when cwd is contests/abc473)
+  elif [[ "$cwd" == "$CONTESTS_DIR/"* && "$(dirname "$cwd")" == "$CONTESTS_DIR" ]]; then
+    CONTEST_ID="$(basename "$cwd")"
+    PROBLEM_ID="$(normalize_task_id "$CONTEST_ID" "$a")"
+    PROBLEM_DIR="$cwd/$PROBLEM_ID"
+
+  # hc test abc473_a   (from anywhere)
+  elif [[ "$a" == *_* ]]; then
+    PROBLEM_ID="$a"
+    CONTEST_ID="${a%_*}"
+    PROBLEM_DIR="$CONTESTS_DIR/$CONTEST_ID/$PROBLEM_ID"
+
+  # hc test path/to/problem
+  elif [[ -d "$a" ]] && is_problem_dir "$(cd "$a" && pwd -P)"; then
+    PROBLEM_DIR="$(cd "$a" && pwd -P)"
+    PROBLEM_ID="$(basename "$PROBLEM_DIR")"
+    CONTEST_ID="$(basename "$(dirname "$PROBLEM_DIR")")"
+
+  else
+    die "cannot resolve task '$a'. Run inside contests/<contest>, use a full problem id, or pass CONTEST TASK."
+  fi
+
+  [[ -f "$PROBLEM_DIR/Main.hs" ]] || die "Main.hs not found: $PROBLEM_DIR/Main.hs"
+  [[ -d "$PROBLEM_DIR/test" ]] || die "test directory not found: $PROBLEM_DIR/test"
+
+  SRC="$PROBLEM_DIR/Main.hs"
+  URL="https://atcoder.jp/contests/$CONTEST_ID/tasks/$PROBLEM_ID"
+}
+
+sync_source() {
+  mkdir -p "$ROOT/.build"
+  cp "$SRC" "$BUILD_SRC"
+}
+
+build_current() {
+  need cabal
+  sync_source
+  (
+    cd "$ROOT"
+    cabal build exe:main
+  )
+  BIN="$(cd "$ROOT" && cabal list-bin exe:main)"
+}
+
+cmd_build() {
+  resolve_problem "${1:-}" "${2:-}"
+  note "build $PROBLEM_ID"
+  build_current
+  printf '%s\n' "$BIN"
+}
+
+cmd_run() {
+  resolve_problem "${1:-}" "${2:-}"
+  note "run $PROBLEM_ID"
+  build_current
+  exec "$BIN"
+}
+
+cmd_test() {
+  resolve_problem "${1:-}" "${2:-}"
+  need oj
+  note "test $PROBLEM_ID"
+  build_current
+  oj test --directory "$PROBLEM_DIR/test" --command "$BIN"
+}
+
+submit_current() {
+  need oj
+  note "submit $PROBLEM_ID -> $URL"
+  oj submit "$URL" "$SRC"
+}
+
+cmd_submit() {
+  resolve_problem "${1:-}" "${2:-}"
+  cmd_test "$CONTEST_ID" "$PROBLEM_ID"
+  submit_current
+}
+
+cmd_submit_only() {
+  resolve_problem "${1:-}" "${2:-}"
+  submit_current
+}
+
+# oj-prepare keeps going when a single step fails, collects the exceptions and
+# re-raises the first one at the very end. Its input-format analyzer is the part
+# that breaks most often (AssertionError in onlinejudge_template/analyzer/match.py
+# for problems whose statement nests loops that reuse an index name, e.g.
+# abc465_g), and the analysis result is unused here because templates/Main.hs is
+# a static template. So a non-zero exit is only a real failure when a file is
+# actually missing: fill in whatever is missing, then judge the run by its files.
+repair_problem() {
+  local dir="$1"
+  local problem_id contest_id url
+  problem_id="$(basename "$dir")"
+  contest_id="$(basename "$(dirname "$dir")")"
+  url="$(problem_url "$contest_id" "$problem_id")"
+
+  if [[ ! -f "$dir/Main.hs" ]]; then
+    note "restore template: $problem_id/Main.hs"
+    cp "$TEMPLATE_SRC" "$dir/Main.hs"
+  fi
+
+  if ! has_samples "$dir"; then
+    note "download samples: $url"
+    ( cd "$dir" && oj download "$url" ) || true
+  fi
+
+  [[ -f "$dir/Main.hs" ]] && has_samples "$dir"
+}
+
+verify_contest() {
+  local contest_id="$1"
+  local prepare_status="$2"
+  local contest_dir="$CONTESTS_DIR/$contest_id"
+  local dir
+  local prepared=0
+  local broken=0
+
+  [[ -d "$contest_dir" ]] \
+    || die "oj-prepare failed before creating $contest_dir (exit status $prepare_status)"
+
+  while IFS= read -r dir; do
+    prepared=$((prepared + 1))
+    if ! repair_problem "$dir"; then
+      broken=$((broken + 1))
+      printf 'hc: incomplete problem directory: %s\n' "$dir" >&2
+    fi
+  done < <(find "$contest_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+
+  [[ "$prepared" -gt 0 ]] \
+    || die "oj-prepare created no problem directory under $contest_dir (exit status $prepare_status)"
+  [[ "$broken" -eq 0 ]] \
+    || die "$broken of $prepared problem(s) under $contest_dir are still incomplete"
+
+  if [[ "$prepare_status" -ne 0 ]]; then
+    note "oj-prepare exited with status $prepare_status (its input-format analyzer failed on at least one problem); the generated files are complete, so this is safe to ignore"
+  fi
+  note "ready: $contest_dir ($prepared problems)"
+}
+
+cmd_new() {
+  local contest="${1:-}"
+  [[ -n "$contest" ]] || die "usage: hc new CONTEST_OR_URL"
+
+  need oj
+  need oj-prepare
+  install_template
+
+  local url
+  if [[ "$contest" == http://* || "$contest" == https://* ]]; then
+    url="$contest"
+  else
+    url="$(contest_url "$contest")"
+  fi
+
+  local contest_id
+  contest_id="$(contest_id_from_url "$url")" \
+    || die "not an AtCoder contest URL: $url"
+  [[ -n "$contest_id" ]] || die "cannot determine the contest id from: $url"
+
+  note "prepare $url"
+  local status=0
+  (
+    cd "$ROOT"
+    oj-prepare --config-file "$PREPARE_CONFIG" "$url"
+  ) || status=$?
+
+  verify_contest "$contest_id" "$status"
+}
+
+cmd_login() {
+  need oj
+  oj login https://atcoder.jp/
+}
+
+cmd_doctor() {
+  local failed=0
+  local c
+
+  printf '%-14s %s\n' "repository" "$ROOT"
+
+  for c in ghc cabal python3 oj oj-prepare; do
+    if command -v "$c" >/dev/null 2>&1; then
+      case "$c" in
+        ghc)        printf '%-14s %s\n' "$c" "$(ghc --numeric-version)" ;;
+        cabal)      printf '%-14s %s\n' "$c" "$(cabal --numeric-version)" ;;
+        python3)    printf '%-14s %s\n' "$c" "$(python3 --version 2>&1)" ;;
+        oj)         printf '%-14s %s\n' "$c" "$(command -v oj)" ;;
+        oj-prepare) printf '%-14s %s\n' "$c" "$(command -v oj-prepare)" ;;
+      esac
+    else
+      printf '%-14s MISSING\n' "$c"
+      failed=1
+    fi
+  done
+
+  if command -v ghc >/dev/null 2>&1; then
+    local v
+    v="$(ghc --numeric-version)"
+    if [[ "$v" != "9.8.4" ]]; then
+      printf '\nNote: AtCoder currently uses GHC 9.8.4; local GHC is %s.\n' "$v"
+    fi
+  fi
+
+  return "$failed"
+}
+
+cmd_setup() {
+  need cabal
+  need oj
+  need oj-prepare
+  install_template
+
+  mkdir -p "$ROOT/.build"
+  cp "$TEMPLATE_SRC" "$BUILD_SRC"
+
+  note "initial Cabal build"
+  (
+    cd "$ROOT"
+    cabal build exe:main
+  )
+
+  note "template installed"
+  printf '%s\n' "$(template_config_dir)/haskell-atcoder.hs"
+}
+
+cmd_clean() {
+  rm -rf "$ROOT/.build" "$ROOT/dist-newstyle"
+  mkdir -p "$ROOT/.build"
+  : > "$ROOT/.build/.gitkeep"
+}
+
+cmd_list() {
+  local contest="${1:-}"
+  if [[ -z "$contest" ]]; then
+    find "$CONTESTS_DIR" -mindepth 1 -maxdepth 1 -type d -print \
+      | sed 's#.*/##' | sort
+  else
+    local dir="$CONTESTS_DIR/$contest"
+    [[ -d "$dir" ]] || die "contest not found: $contest"
+    find "$dir" -mindepth 1 -maxdepth 1 -type d -print \
+      | sed 's#.*/##' | sort
+  fi
+}
+
+cmd_open() {
+  resolve_problem "${1:-}" "${2:-}"
+  case "$(uname -s)" in
+    Darwin) open "$URL" ;;
+    Linux) xdg-open "$URL" ;;
+    *) printf '%s\n' "$URL" ;;
+  esac
+}
+
+usage() {
+  cat <<'EOF'
+Haskell + Cabal competitive-programming helper
+
+Usage:
+  hc setup
+  hc doctor
+  hc login
+  hc new CONTEST_OR_URL
+
+  hc build [TASK]
+  hc run [TASK]
+  hc test [TASK]
+  hc submit [TASK]
+  hc submit-only [TASK]
+  hc open [TASK]
+
+Task forms:
+  Inside contests/abc473:
+    hc test a
+
+  Inside contests/abc473/abc473_a:
+    hc test
+
+  From anywhere:
+    hc test abc473_a
+    hc test abc473 a
+
+Other:
+  hc list [CONTEST]
+  hc clean
+  hc help
+
+Typical workflow:
+  hc new abc473
+  cd contests/abc473
+  hc test a
+  hc submit a
+EOF
+}
+
+cmd="${1:-help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+case "$cmd" in
+  setup)       cmd_setup "$@" ;;
+  doctor)      cmd_doctor "$@" ;;
+  login)       cmd_login "$@" ;;
+  new)         cmd_new "$@" ;;
+  build)       cmd_build "$@" ;;
+  run)         cmd_run "$@" ;;
+  test)        cmd_test "$@" ;;
+  submit)      cmd_submit "$@" ;;
+  submit-only) cmd_submit_only "$@" ;;
+  open)        cmd_open "$@" ;;
+  list)        cmd_list "$@" ;;
+  clean)       cmd_clean "$@" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command '$cmd' (try: hc help)" ;;
+esac
