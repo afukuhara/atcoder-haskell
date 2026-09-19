@@ -1,7 +1,0 @@
-# Paths are relative to the repository root.
-# bin/hc always runs oj-prepare from the repository root.
-contest_directory = "contests/{contest_id}"
-problem_directory = "{problem_id}"
-
-[templates]
-"Main.hs" = "haskell-atcoder.hs"
