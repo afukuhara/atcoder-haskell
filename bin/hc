@@ -150,8 +150,34 @@ sync_source() {
   cp "$SRC" "$BUILD_SRC"
 }
 
+# macOS: `xcrun` resolves to the newest installed SDK, which can be newer than
+# the Command Line Tools linker supports. A MacOSX27 SDK with the CLT 26.x `ld`
+# breaks every link with:
+#   ld: tapi error: malformed file ... unknown architecture arm64e.x1-macos
+# Pin SDKROOT to the newest SDK matching the running macOS major version.
+ensure_sdkroot() {
+  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  [[ -n "${SDKROOT:-}" ]] && return 0
+  command -v xcrun >/dev/null 2>&1 || return 0
+
+  local os_major sdk_path sdk_major sdks_dir candidate
+  os_major="$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)" || return 0
+  sdk_path="$(xcrun --show-sdk-path 2>/dev/null)" || return 0
+  sdk_major="$(xcrun --show-sdk-version 2>/dev/null | cut -d. -f1)" || return 0
+  [[ "$os_major" =~ ^[0-9]+$ && "$sdk_major" =~ ^[0-9]+$ ]] || return 0
+  (( sdk_major > os_major )) || return 0
+
+  sdks_dir="$(dirname "$sdk_path")"
+  candidate="$(ls -d "$sdks_dir"/MacOSX"$os_major"*.sdk 2>/dev/null | sort -V | tail -1)"
+  [[ -n "$candidate" && -d "$candidate" ]] || return 0
+
+  export SDKROOT="$candidate"
+  note "SDKROOT=$SDKROOT (default SDK $sdk_path is newer than macOS $os_major)"
+}
+
 build_current() {
   need cabal
+  ensure_sdkroot
   sync_source
   (
     cd "$ROOT"
@@ -312,6 +338,15 @@ cmd_doctor() {
     fi
   done
 
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v xcrun >/dev/null 2>&1; then
+    local sdkroot_before="${SDKROOT:-}"
+    ensure_sdkroot 2>/dev/null
+    printf '%-14s %s\n' "macOS SDK" "${SDKROOT:-$(xcrun --show-sdk-path 2>/dev/null)}"
+    if [[ -z "$sdkroot_before" && -n "${SDKROOT:-}" ]]; then
+      printf '%-14s %s\n' "" "(pinned; the default SDK is too new for the installed linker)"
+    fi
+  fi
+
   if command -v ghc >/dev/null 2>&1; then
     local v
     v="$(ghc --numeric-version)"
@@ -331,6 +366,8 @@ cmd_setup() {
 
   mkdir -p "$ROOT/.build"
   cp "$TEMPLATE_SRC" "$BUILD_SRC"
+
+  ensure_sdkroot
 
   note "initial Cabal build"
   (

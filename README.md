@@ -307,3 +307,33 @@ make check
 ```
 
 `hc doctor` はローカル GHC が 9.8.4 と異なる場合も表示します。
+
+## macOS のリンクエラー (tapi error: malformed file)
+
+`hc build` / `hc test` が次のエラーで失敗する場合:
+
+```
+ld: tapi error: malformed file
+.../MacOSX27.0.sdk/System/Library/Frameworks/Security.framework/.../Security.tbd:4:20: error: unknown architecture
+                   arm64e.x1-macos, arm64e.x1-maccatalyst ]
+```
+
+原因は GHC/Cabal ではなく Command Line Tools の構成です。`xcrun` は
+インストール済みで最も新しい SDK を選ぶため、OS より新しい SDK
+(例: macOS 26 上の `MacOSX27.0.sdk`) が選ばれます。その SDK の `.tbd` は
+新しい `arm64e.x1` ターゲットを含み、古い `ld` は解析できません
+(`clang hello.c` のような素の C のリンクも同様に失敗します)。
+
+`bin/hc` はビルド前に `SDKROOT` を OS のメジャーバージョンに一致する
+最新 SDK へ固定してこれを回避します。現在選ばれている SDK は
+`hc doctor` で確認できます。
+
+恒久的に直す場合は次のどちらかです:
+
+- Command Line Tools を SDK に合うバージョンへ更新する
+  (`softwareupdate --list` / Apple Developer からの再インストール)
+- 使っていない新しい SDK を削除する
+  (`sudo rm -rf /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk`)
+
+シェル側で固定する場合は `export SDKROOT="$(xcrun --sdk macosx26.5 --show-sdk-path)"`
+のように設定します。
