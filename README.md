@@ -1,6 +1,6 @@
 # Haskell + Cabal: cargo-compete-like AtCoder environment
 
-`oj-prepare` + `online-judge-tools` + Cabal を `bin/hc` でまとめた、
+`online-judge-tools` + Cabal を `bin/hc` でまとめた、
 Haskell 用の軽量な `cargo-compete` 風環境です。
 
 ## Directory layout
@@ -13,8 +13,6 @@ haskell-atcoder/
 ├── Makefile
 ├── bin/
 │   └── hc
-├── config/
-│   └── prepare.config.toml
 ├── templates/
 │   └── Main.hs
 ├── tests/
@@ -44,8 +42,7 @@ GHC オプションを一元管理できます。
 
 - GHC / Cabal
 - Python 3
-- `online-judge-tools` (`oj`)
-- `online-judge-template-generator` (`oj-prepare`)
+- `online-judge-tools` (`oj`, `oj-api`)
 
 AtCoder とローカル環境をできるだけ一致させるなら GHC 9.8.4 を推奨します。
 
@@ -55,7 +52,7 @@ AtCoder とローカル環境をできるだけ一致させるなら GHC 9.8.4 �
 ghcup install ghc 9.8.4
 ghcup set ghc 9.8.4
 
-python3 -m pip install --user online-judge-tools online-judge-template-generator
+python3 -m pip install --user online-judge-tools
 ```
 
 環境によっては `pipx` や `uv tool` を使ってインストールしても構いません。
@@ -82,12 +79,7 @@ hc setup
 hc login
 ```
 
-`hc setup` は:
-
-1. `templates/Main.hs` を `oj-prepare` 用テンプレートとして登録
-2. Cabal の初回 build
-
-を行います。
+`hc setup` は `templates/Main.hs` を使った Cabal の初回 build を行います。
 
 ## 4. Create a contest
 
@@ -95,11 +87,11 @@ hc login
 hc new abc473
 ```
 
-内部では概ね次を実行します。
+内部では次を行います。
 
-```bash
-oj-prepare   --config-file config/prepare.config.toml   https://atcoder.jp/contests/abc473
-```
+1. `oj-api get-contest` で問題一覧を取得 (1 リクエスト)
+2. 各問題に `templates/Main.hs` をコピー
+3. 各問題で `oj download` を実行してサンプルを取得
 
 生成結果:
 
@@ -114,30 +106,26 @@ contests/abc473/
 └── ...
 ```
 
-### oj-prepare の解析エラーについて
+既存の `Main.hs` とサンプルは上書きしません。途中で失敗した場合は
+`hc new abc473` を再実行すると、欠けている問題だけを取得し直します。
 
-`oj-prepare` は入力フォーマットの解析に失敗した問題があると、
-最後に `AssertionError` などのトレースバックを出して非ゼロ終了します
-(例: `abc465_g`。同じ添字名を使う入れ子ループがあると
-`onlinejudge_template/analyzer/match.py` の `assert` に引っかかります)。
+### 429 Too Many Requests について
 
-この解析結果は `templates/Main.hs` が静的テンプレートであるため使われず、
-`Main.hs` の生成とサンプルのダウンロードは解析失敗後も実行されます。
+AtCoder は短時間に連続したリクエストへ `429 Too Many Requests` を返します。
+以前使っていた `oj-prepare` は 1 問につき 3 回、間隔を空けずにアクセスするため、
+問題数が多いと途中で 429 になっていました
+(入力フォーマット解析の `AssertionError` なども出ますが、
+`templates/Main.hs` は静的テンプレートなので解析結果は使っていません)。
 
-そのため `hc new` は `oj-prepare` の終了ステータスではなく、
-**生成されたファイル**で成否を判定します。
+`hc new` は 1 問につき `oj download` を 1 回だけ実行し、
+リクエストの間隔を空け、失敗したときはリトライします。
+間隔は環境変数で調整できます。
 
-- `Main.hs` が無い問題 -> `templates/Main.hs` をコピー
-- サンプルが無い問題 -> `oj download` で取得し直す
-- それでも欠けている問題があるときだけ `hc new` は失敗する
-
-トレースバックが出ていても最後に
-
-```text
-==> ready: .../contests/abc465 (7 problems)
-```
-
-と表示されていれば、全問題が揃っています。
+| 変数 | 既定値 | 意味 |
+|------|--------|------|
+| `HC_REQUEST_INTERVAL` | `2` | 各ダウンロード前に待つ秒数 |
+| `HC_DOWNLOAD_ATTEMPTS` | `3` | 1 問あたりの最大試行回数 |
+| `HC_RETRY_WAIT` | `10` | リトライ前に待つ秒数 |
 
 ## 5. Solve / test / submit
 

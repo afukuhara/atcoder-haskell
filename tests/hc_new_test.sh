@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stubbed tests for `hc new` resilience. No network access.
+# Stubbed tests for `hc new`. No network access.
 set -uo pipefail
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,35 +8,56 @@ pass=0; fail=0
 setup() {
   SANDBOX="$(mktemp -d)"
   mkdir -p "$SANDBOX/root" "$SANDBOX/stub" "$SANDBOX/home"
-  cp -R "$REPO/bin" "$REPO/templates" "$REPO/config" "$SANDBOX/root/"
+  cp -R "$REPO/bin" "$REPO/templates" "$SANDBOX/root/"
   mkdir -p "$SANDBOX/root/contests"
-  cat > "$SANDBOX/stub/oj" <<'STUB'
+  : > "$SANDBOX/oj.log"
+
+  # `oj-api get-contest <url>` lists the problem ids in $OJ_API_PROBLEMS.
+  # OJ_API_FAILS makes it answer like a contest that cannot be read.
+  cat > "$SANDBOX/stub/oj-api" <<'STUB'
 #!/usr/bin/env bash
-# `oj download <url>` writes samples into ./test, unless OJ_DOWNLOAD_FAILS is set.
-[[ "${1:-}" == "download" ]] || exit 0
-[[ -n "${OJ_DOWNLOAD_FAILS:-}" ]] && { echo "stub oj: download failed" >&2; exit 1; }
+[[ "${1:-}" == "get-contest" ]] || exit 1
+if [[ -n "${OJ_API_FAILS:-}" ]]; then
+  echo '{"status": "error", "messages": ["stub oj-api: 404 Not Found"], "result": null}'
+  exit 1
+fi
+url="$2"
+sep=""
+printf '{"status": "ok", "messages": [], "result": {"url": "%s", "problems": [' "$url"
+for p in ${OJ_API_PROBLEMS:-}; do
+  printf '%s{"url": "%s/tasks/%s"}' "$sep" "$url" "$p"
+  sep=", "
+done
+printf ']}}\n'
+STUB
+
+  # `oj download <url>` writes samples into ./test and logs the call.
+  # OJ_DOWNLOAD_FAILS=1 always fails; OJ_DOWNLOAD_FAIL_TIMES=N fails the first
+  # N calls (like AtCoder answering 429 Too Many Requests).
+  cat > "$SANDBOX/stub/oj" <<STUB
+#!/usr/bin/env bash
+[[ "\${1:-}" == "download" ]] || exit 0
+echo "\$2" >> "$SANDBOX/oj.log"
+calls=\$(wc -l < "$SANDBOX/oj.log")
+if [[ -n "\${OJ_DOWNLOAD_FAILS:-}" ]] || (( calls <= \${OJ_DOWNLOAD_FAIL_TIMES:-0} )); then
+  echo "stub oj: 429 Client Error: Too Many Requests" >&2
+  exit 1
+fi
 mkdir -p test
 echo "1" > test/sample-1.in
 echo "1" > test/sample-1.out
 STUB
-  cat > "$SANDBOX/stub/oj-prepare" <<'STUB'
-#!/usr/bin/env bash
-echo "stub oj-prepare: AssertionError (analyzer)" >&2
-exit "${OJ_PREPARE_STATUS:-1}"
-STUB
-  chmod +x "$SANDBOX/stub/oj" "$SANDBOX/stub/oj-prepare"
-}
-
-make_problem() {  # make_problem <contest> <problem> <with_main> <with_samples>
-  local d="$SANDBOX/root/contests/$1/$2"
-  mkdir -p "$d/test"
-  [[ "$3" == yes ]] && cp "$SANDBOX/root/templates/Main.hs" "$d/Main.hs"
-  if [[ "$4" == yes ]]; then echo 1 > "$d/test/sample-1.in"; echo 1 > "$d/test/sample-1.out"; fi
-  return 0
+  chmod +x "$SANDBOX/stub/oj" "$SANDBOX/stub/oj-api"
 }
 
 run_hc() {
-  ( export PATH="$SANDBOX/stub:$PATH" HOME="$SANDBOX/home"; "$SANDBOX/root/bin/hc" "$@" ) 2>&1
+  ( export PATH="$SANDBOX/stub:$PATH" HOME="$SANDBOX/home" \
+      HC_REQUEST_INTERVAL=0 HC_RETRY_WAIT=0
+    "$SANDBOX/root/bin/hc" "$@" ) 2>&1
+}
+
+download_count() {
+  wc -l < "$SANDBOX/oj.log" | tr -d ' '
 }
 
 check() {  # check <name> <expected_status> <actual_status> <output> [expected_substring]
@@ -48,55 +69,68 @@ check() {  # check <name> <expected_status> <actual_status> <output> [expected_s
   fi
 }
 
-# 1. analyzer failed, but every file is present -> success
-setup
-make_problem abc465 abc465_a yes yes
-make_problem abc465 abc465_g yes yes
-out="$(run_hc new abc465)"; st=$?
-check "analyzer failure with complete files succeeds" 0 "$st" "$out" "ready:"
+assert() {  # assert <name> <command...>
+  local name="$1"; shift
+  if "$@"; then
+    echo "PASS: $name"; pass=$((pass+1))
+  else
+    echo "FAIL: $name"; fail=$((fail+1))
+  fi
+}
 
-# 2. missing Main.hs and samples are repaired
+# 1. fresh contest: every problem gets Main.hs and samples
 setup
-make_problem abc465 abc465_a yes yes
-make_problem abc465 abc465_g no no
-out="$(run_hc new abc465)"; st=$?
-check "missing files are repaired" 0 "$st" "$out" "restore template: abc465_g/Main.hs"
-[[ -f "$SANDBOX/root/contests/abc465/abc465_g/Main.hs" ]] \
-  && [[ -f "$SANDBOX/root/contests/abc465/abc465_g/test/sample-1.in" ]] \
-  && { echo "PASS: repaired files exist on disk"; pass=$((pass+1)); } \
-  || { echo "FAIL: repaired files exist on disk"; fail=$((fail+1)); }
+out="$( export OJ_API_PROBLEMS="abc461_a abc461_b abc461_e"; run_hc new abc461 )"; st=$?
+check "fresh contest succeeds" 0 "$st" "$out" "contests/abc461 (3 problems)"
+d="$SANDBOX/root/contests/abc461"
+assert "files exist on disk" \
+  test -f "$d/abc461_a/Main.hs" -a -f "$d/abc461_e/Main.hs" -a -f "$d/abc461_e/test/sample-1.in"
+assert "one download per problem" test "$(download_count)" -eq 3
 
-# 3. unrepairable problem -> failure
+# 2. rerun keeps edited Main.hs and skips problems that already have samples
 setup
-make_problem abc465 abc465_a yes yes
-make_problem abc465 abc465_g no no
-out="$( export OJ_DOWNLOAD_FAILS=1; run_hc new abc465 )"; st=$?
-check "unrepairable problem fails" 2 "$st" "$out" "still incomplete"
+mkdir -p "$SANDBOX/root/contests/abc461/abc461_a/test"
+echo "edited" > "$SANDBOX/root/contests/abc461/abc461_a/Main.hs"
+echo 1 > "$SANDBOX/root/contests/abc461/abc461_a/test/sample-1.in"
+out="$( export OJ_API_PROBLEMS="abc461_a abc461_b"; run_hc new abc461 )"; st=$?
+check "rerun succeeds" 0 "$st" "$out" "ready:"
+assert "edited Main.hs is kept" \
+  test "$(cat "$SANDBOX/root/contests/abc461/abc461_a/Main.hs")" = "edited"
+assert "existing samples are not downloaded again" test "$(download_count)" -eq 1
 
-# 4. contest directory never created -> failure
+# 3. transient 429 is retried
 setup
-out="$(run_hc new abc999)"; st=$?
-check "missing contest directory fails" 2 "$st" "$out" "failed before creating"
+out="$( export OJ_API_PROBLEMS="abc461_e" OJ_DOWNLOAD_FAIL_TIMES=2; run_hc new abc461 )"; st=$?
+check "transient download failure is retried" 0 "$st" "$out" "retrying"
+assert "sample exists after retry" test -f "$SANDBOX/root/contests/abc461/abc461_e/test/sample-1.in"
 
-# 5. clean oj-prepare run stays successful
+# 4. persistent download failure -> failure naming the problem
 setup
-make_problem abc471 abc471_a yes yes
-out="$( export OJ_PREPARE_STATUS=0; run_hc new abc471 )"; st=$?
-check "successful oj-prepare run succeeds" 0 "$st" "$out" "ready:"
+out="$( export OJ_API_PROBLEMS="abc461_a" OJ_DOWNLOAD_FAILS=1; run_hc new abc461 )"; st=$?
+check "persistent download failure fails" 2 "$st" "$out" "incomplete problem directory"
+assert "attempts are bounded" test "$(download_count)" -eq 3
 
-# 6. contest URL form works
+# 5. problem list cannot be fetched -> failure
 setup
-make_problem abc465 abc465_a yes yes
-out="$(run_hc new https://atcoder.jp/contests/abc465)"; st=$?
+out="$( export OJ_API_FAILS=1; run_hc new abc999 )"; st=$?
+check "unlistable contest fails" 2 "$st" "$out" "cannot list the problems"
+
+# 6. contest without problems -> failure
+setup
+out="$( export OJ_API_PROBLEMS=""; run_hc new abc999 )"; st=$?
+check "empty contest fails" 2 "$st" "$out" "no problems found"
+
+# 7. contest URL form works
+setup
+out="$( export OJ_API_PROBLEMS="abc465_a"; run_hc new https://atcoder.jp/contests/abc465 )"; st=$?
 check "contest URL form" 0 "$st" "$out" "contests/abc465 (1 problems)"
 
-# 7. problem URL form resolves to its contest
+# 8. problem URL form resolves to its contest
 setup
-make_problem abc465 abc465_g yes yes
-out="$(run_hc new https://atcoder.jp/contests/abc465/tasks/abc465_g)"; st=$?
-check "problem URL form" 0 "$st" "$out" "contests/abc465"
+out="$( export OJ_API_PROBLEMS="abc465_g"; run_hc new https://atcoder.jp/contests/abc465/tasks/abc465_g )"; st=$?
+check "problem URL form" 0 "$st" "$out" "contests/abc465 (1 problems)"
 
-# 8. non-AtCoder URL is rejected
+# 9. non-AtCoder URL is rejected
 setup
 out="$(run_hc new https://example.com/foo)"; st=$?
 check "non-AtCoder URL rejected" 2 "$st" "$out" "not an AtCoder contest URL"
