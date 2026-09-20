@@ -22,6 +22,12 @@ word = skipSpace *> takeWhile1 (notInClass " \t\r\n")
 ints :: Int -> Parser [Int]
 ints = flip replicateM int
 
+index :: Parser Int
+index = subtract 1 <$> int
+
+indices :: Int -> Parser [Int]
+indices = flip replicateM index
+
 -- Edit here ------------------------------------------------------------------
 
 data Input = Input
