@@ -6,6 +6,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString.Char8
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
+import Data.List (sort)
 
 -- Common parsers -------------------------------------------------------------
 
@@ -23,23 +24,19 @@ ints = flip replicateM int
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input [Int] [Int]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n <- int
+  a <- ints n
+  b <- ints n
+  pure (Input a b)
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input a b) = do
+  putStrLn $ if any (\(i, ai) -> b !! (ai - 1) /= i) (zip [1 ..] a) then "No" else "Yes"
 
 -- Do not usually edit below ---------------------------------------------------
 

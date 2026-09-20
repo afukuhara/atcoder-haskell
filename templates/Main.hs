@@ -6,6 +6,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString.Char8
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
+import Data.List (sort)
 
 -- Common parsers -------------------------------------------------------------
 
