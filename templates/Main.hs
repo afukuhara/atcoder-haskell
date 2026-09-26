@@ -3,7 +3,7 @@
 
 import Control.Monad (replicateM)
 import qualified Data.ByteString.Char8 as BS
-import Data.Attoparsec.ByteString.Char8
+import Data.Attoparsec.ByteString.Char8 hiding (take)
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
 import Data.List (sort)
@@ -27,6 +27,9 @@ index = subtract 1 <$> int
 
 indices :: Int -> Parser [Int]
 indices = flip replicateM index
+
+pair :: Parser a -> Parser b -> Parser (a, b)
+pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
