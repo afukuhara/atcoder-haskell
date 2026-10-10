@@ -33,23 +33,24 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int [Char]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  s <- word
+  pure $ Input n $ BS.unpack s
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n cs) = do
+  putStrLn $ filterFirstO cs False
+
+filterFirstO :: [Char] -> Bool -> [Char]
+filterFirstO ('o':cs) False = filterFirstO cs False
+filterFirstO (c:cs) _ = c : filterFirstO cs True
+filterFirstO [] _ = []
+
 
 -- Do not usually edit below ---------------------------------------------------
 
