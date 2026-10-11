@@ -33,23 +33,29 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int Int [Int]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  t  <- int
+  x  <- int
+  as <- ints (t + 1)
+  pure $ Input t x as
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input t x as) = do
+  let first : rest = as
+  let result = solver x first (zip [1 ..] rest) 
+  mapM_ (\(a, b) -> putStrLn $ show a ++ " " ++ show b)
+        ((0, first) : result)
+
+
+solver :: Int -> Int -> [(Int, Int)] -> [(Int, Int)]
+solver x first ((a, b):xs) = do 
+  if abs(b - first) >= x then (a, b) : solver x b xs else solver x first xs
+solver _ _ [] = []
+
 
 -- Do not usually edit below ---------------------------------------------------
 
