@@ -33,23 +33,30 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int [Double]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  xs <- ints n
+  pure (Input n (map fromIntegral xs))
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n xs) = do
+  print $ dfs 0.5 xs 0
+
+dfs :: Double -> [Double] -> Int -> Int
+dfs pos (x:xs) cn = do
+  let pos' = pos + x
+  let pos'' = pos - x
+  let plused = if inverted pos pos' then 1 else 0
+  let minused = if inverted pos pos'' then 1 else 0
+  max (dfs pos' xs (cn + plused)) (dfs pos'' xs (cn + minused))
+dfs _ [] cn = cn
+
+inverted :: Double -> Double -> Bool
+inverted x y = x < 0 && y > 0 || x > 0 && y < 0
 
 -- Do not usually edit below ---------------------------------------------------
 
