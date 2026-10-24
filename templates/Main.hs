@@ -7,6 +7,7 @@ import Data.Attoparsec.ByteString.Char8 hiding (take)
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
 import Data.List (sort)
+import Data.Bool
 
 -- Common parsers -------------------------------------------------------------
 
