@@ -34,23 +34,17 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  pure $ Input n
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n) = do
+  print $ foldl (\acc i -> acc + (i ^ 3) * (-1) ^ i) 0 [1 .. n]
 
 -- Do not usually edit below ---------------------------------------------------
 
