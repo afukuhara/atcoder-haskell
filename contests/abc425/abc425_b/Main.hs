@@ -6,8 +6,9 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString.Char8 hiding (take)
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
-import Data.List (sort)
+import Data.List (sort, group, groupBy, sortBy, intercalate)
 import Data.Bool
+import qualified Data.Set as S
 
 -- Common parsers -------------------------------------------------------------
 
@@ -34,23 +35,33 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int [Int]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  xs <- ints n
+  pure $ Input n xs
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n xs) = do
+  let ys = filter (\x -> x /= -1) xs
+  let zs = S.fromList ys
+
+  if S.size zs < length ys then
+    putStrLn "No"
+  else do
+    let remainingNumbers = filter (`notElem` ys) [1..n] 
+    let filledMinusone = fillMinusone xs remainingNumbers 
+    putStrLn "Yes"
+    putStrLn $ intercalate " " $ map show filledMinusone
+
+fillMinusone :: [Int] -> [Int] -> [Int]
+fillMinusone [] _ = []
+fillMinusone (-1:xs) (y:ys) = y : fillMinusone xs ys
+fillMinusone (-1:_) [] = error "右のリストの要素が不足しています"
+fillMinusone (x:xs) ys = x : fillMinusone xs ys
 
 -- Do not usually edit below ---------------------------------------------------
 
