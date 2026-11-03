@@ -6,8 +6,9 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Attoparsec.ByteString.Char8 hiding (take)
 import qualified Data.Map.Strict as M
 import Data.Char (toLower)
-import Data.List (sort)
+import Data.List (sort, scanl')
 import Data.Bool
+import Data.Array.IO (IOUArray, newListArray, readArray, writeArray)
 
 -- Common parsers -------------------------------------------------------------
 
@@ -34,23 +35,46 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+
+data Query
+  = Rotate Int
+  | RangeSum Int Int
+  deriving (Show)
+
+query :: Parser Query
+query = do
+  t <- int
+  case t of
+    1 -> Rotate <$> int
+    2 -> RangeSum <$> int <*> int
+    _ -> fail "Unknown query type"
+
+data Input = Input Int Int [Int] [Query]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  q  <- int
+  as <- ints n
+  qs <- replicateM q query
+  pure $ Input n q as qs
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n q as qs) = do
+  let ss = scanl' (+) 0 (as ++ as)
+  arr <- newListArray (0, length ss - 1) ss :: IO (IOUArray Int Int)
+  solver 0 n arr qs
+
+solver :: Int -> Int -> IOUArray Int Int -> [Query] -> IO ()
+solver i n ss qs = case qs of
+  [] -> pure ()
+  (Rotate j:qs) -> solver ((i + j) `mod` n) n ss qs
+  (RangeSum l r:qs) -> do
+    right <- readArray ss (r + i)
+    left  <- readArray ss (l + i - 1)
+    print $ right - left
+    solver i n ss qs
 
 -- Do not usually edit below ---------------------------------------------------
 
