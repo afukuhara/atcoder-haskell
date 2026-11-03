@@ -9,6 +9,7 @@ import Data.Char (toLower)
 import Data.List (sort, group, groupBy, sortBy, intercalate, scanl')
 import Data.Bool
 import Data.Array.IO (IOUArray, newListArray, readArray, writeArray)
+import Data.Array.Unboxed (UArray, listArray, (!))
 
 -- Common parsers -------------------------------------------------------------
 
