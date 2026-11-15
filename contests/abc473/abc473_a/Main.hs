@@ -47,7 +47,7 @@ input = do
 
 solve :: Input -> IO ()
 solve (Input n xs) = do
-  putStrLn $ show $ sum [e | (i, e) <- zip [0..] xs, i >= n `div` 2 ]
+  print $ sum [e | (i, e) <- zip [0..] xs, i >= n `div` 2 ]
 
 -- Do not usually edit below ---------------------------------------------------
 
