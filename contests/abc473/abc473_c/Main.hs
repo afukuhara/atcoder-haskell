@@ -36,23 +36,29 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int Int [Int]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n <- int
+  k <- int
+  as <- ints n
+  pure $ Input n k as
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
-  pure ()
+solve (Input n k as) = do
+  let counts = M.elems $ M.fromListWith (+) [(x, 1) | x <- as]
+      counts' = M.fromListWith (+) [(x, 1) | x <- counts]
+      tops = take 2 $ reverse $ sort $ M.keys counts'
+      values = map (counts' M.!) (pickTop tops)
+
+  print $ sum values
+  where
+    pickTop xs = case sortBy (flip compare) xs of
+      (a:b:_) | a - b == 1 -> [a, b]
+      (a:_)                -> [a]
+      []                   -> []
 
 -- Do not usually edit below ---------------------------------------------------
 
