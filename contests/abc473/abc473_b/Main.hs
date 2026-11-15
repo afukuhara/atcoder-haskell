@@ -36,22 +36,19 @@ pair p q = (,) <$> p <*> q
 
 -- Edit here ------------------------------------------------------------------
 
-data Input = Input
+data Input = Input Int [Int]
   deriving (Show)
 
 input :: Parser Input
 input = do
-  -- Example:
-  --
-  -- n  <- int
-  -- xs <- ints n
-  --
-  -- Change Input above and construct it here.
-  pure Input
+  n  <- int
+  xs <- ints n
+  pure $ Input n xs
 
 solve :: Input -> IO ()
-solve _ = do
-  -- Write the answer here.
+solve (Input n xs) = do
+  let m =  M.fromListWith (+) [(x, 1) | x <- xs]
+  print $ sum $ map fst $ filter (\(k, v) -> v `mod` 2 /= 0) $ M.toList m
   pure ()
 
 -- Do not usually edit below ---------------------------------------------------
