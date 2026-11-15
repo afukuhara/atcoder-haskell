@@ -49,7 +49,6 @@ solve :: Input -> IO ()
 solve (Input n xs) = do
   let m =  M.fromListWith (+) [(x, 1) | x <- xs]
   print $ sum $ map fst $ filter (\(k, v) -> v `mod` 2 /= 0) $ M.toList m
-  pure ()
 
 -- Do not usually edit below ---------------------------------------------------
 
